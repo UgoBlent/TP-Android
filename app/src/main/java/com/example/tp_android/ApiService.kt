@@ -9,7 +9,14 @@ interface ApiService {
     suspend fun getProduct(): Product
 
     @GET("products")
-    suspend fun getProducts(): List<Product>
+    suspend fun getAllProducts(): List<Product>
+
+    @GET("products/category/{category}")
+    suspend fun getProductsByCategory(@Path("category") category: String): List<Product>
+
+    @GET("products/categories")
+    suspend fun getCategories(): List<String>
+
 
 //    @GET("products/categories/1")
 //    suspend fun getProductByCatId(): Product
