@@ -16,17 +16,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,9 +47,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.rememberNavController
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
+import android.widget.Toast
 import com.example.tp_android.Entity.Product
 
 class MainActivity : ComponentActivity() {
@@ -66,17 +71,22 @@ fun PageProduit() {
     var products by remember { mutableStateOf<List<Product>?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
+    val cartState = remember { mutableStateOf(false) }
+    val cartItems = remember { mutableStateListOf<CartItem>() }
+    val navController = rememberNavController()
+
     // Charger les produits selon la catégorie
     LaunchedEffect(selectedCategory) {
         coroutineScope.launch {
-            try {
-                products = if (selectedCategory == null) {
+            products = try {
+                if (selectedCategory == null) {
                     RetrofitInstance.api.getAllProducts()
                 } else {
                     RetrofitInstance.api.getProductsByCategory(selectedCategory!!)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                null
             }
         }
     }
@@ -89,7 +99,7 @@ fun PageProduit() {
                 modifier = Modifier
                     .fillMaxWidth(0.8f)
                     .fillMaxHeight()
-                    .background(Color.White.copy(alpha = 0.9f)) // Fond blanc avec légère transparence
+                    .background(Color.White.copy(alpha = 0.9f)) // Fond blanc avec transparence
             ) {
                 DrawerContent(
                     onAllProductsClick = {
@@ -120,6 +130,16 @@ fun PageProduit() {
                     }
                 )
             },
+            // Bouton pour le panier
+            floatingActionButton = {
+                FloatingActionButton(
+                    onClick = { cartState.value = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Default.ShoppingCart, contentDescription = "Panier")
+                }
+            },
             content = { innerPadding ->
                 Box(modifier = Modifier.padding(innerPadding)) {
                     if (products != null) {
@@ -129,7 +149,9 @@ fun PageProduit() {
                                 .padding(horizontal = 16.dp)
                         ) {
                             items(products!!) { product ->
-                                ProductCard(product = product)
+                                ProductCard(product = product) { item ->
+                                    addToCart(item, cartItems)
+                                }
                             }
                         }
                     } else {
@@ -138,14 +160,28 @@ fun PageProduit() {
                 }
             }
         )
+        // Afficher le panier si nécessaire
+        if (cartState.value) {
+            CartDialog(cartState, cartItems)
+        }
     }
 
 }
 
+// Ajouter un produit au panier
+fun addToCart(product: Product, cartItems: MutableList<CartItem>) {
+    val existingItem = cartItems.find { it.product.id == product.id }
+    if (existingItem != null) {
+        existingItem.quantity++
+    } else {
+        cartItems.add(CartItem(product, 1))
+
+    }
+}
 
 // Une carte par produit, avec l'image, le titre et le prix du produit
 @Composable
-fun ProductCard(product: Product) {
+fun ProductCard(product: Product, onAddToCart: (Product) -> Unit) {
     var showDialog by remember { mutableStateOf(false) }
 
     Card(
@@ -180,18 +216,21 @@ fun ProductCard(product: Product) {
                 )
             }
         }
-    }
-
-    // Affichage du pop-up
-    if (showDialog) {
-        ProductDetailDialog(product = product, onDismiss = { showDialog = false })
+        // Affichage de la Pop Up pour un produit
+        if (showDialog) {
+            ProductDetailDialog(
+                product = product,
+                onDismiss = { showDialog = false },
+                onAddToCart = onAddToCart
+            )
+        }
     }
 }
 
 
 // Pop up pour afficher les information d'un produit lorsqu'on clique sur sa ProductCard
 @Composable
-fun ProductDetailDialog(product: Product, onDismiss: () -> Unit) {
+fun ProductDetailDialog(product: Product, onDismiss: () -> Unit, onAddToCart: (Product) -> Unit) {
     AlertDialog(
         onDismissRequest = { onDismiss() },
         title = {
@@ -253,9 +292,71 @@ fun ProductDetailDialog(product: Product, onDismiss: () -> Unit) {
                 }
             }
         },
+        // Deux boutons : ajouter au panier et fermer
         confirmButton = {
-            TextButton(onClick = { onDismiss() }) {
-                Text(text = "Fermer")
+            Row {
+                TextButton(onClick = { onAddToCart(product) }) {
+                    Text("Ajouter au panier")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                TextButton(onClick = { onDismiss() }) {
+                    Text("Fermer")
+                }
+            }
+        }
+    )
+}
+
+// Pop-up du panier
+@Composable
+fun CartDialog(cartState: MutableState<Boolean>, cartItems: List<CartItem>) {
+    AlertDialog(
+        onDismissRequest = { cartState.value = false },
+        title = { Text("Mon Panier") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .height(400.dp)
+                    .fillMaxWidth()
+            ) {
+                if (cartItems.isEmpty()) {
+                    Text("Votre panier est vide.", style = MaterialTheme.typography.bodyLarge)
+                } else {
+                    LazyColumn {
+                        items(cartItems) { item ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Image(
+                                    painter = rememberAsyncImagePainter(item.product.image),
+                                    contentDescription = item.product.title,
+                                    modifier = Modifier.size(40.dp),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(item.product.title, maxLines = 1)
+                                    Text("Quantité : ${item.quantity}")
+                                }
+                                Text("${item.product.price * item.quantity} €")
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Total : ${cartItems.sumOf { it.product.price * it.quantity }} €",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.align(Alignment.End)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { cartState.value = false }) {
+                Text("Fermer")
             }
         }
     )
@@ -309,4 +410,3 @@ fun DrawerContent(
         }
     }
 }
-
